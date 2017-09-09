@@ -7,6 +7,7 @@ import os
 import numpy as np
 from numpy.testing import assert_allclose
 from torchtext import vocab
+from vocab import Vectors, FastText, GloVe, CharNGram
 
 from .common.test_markers import slow
 from .common.torchtext_test_case import TorchtextTestCase
@@ -25,7 +26,7 @@ class TestVocab(TorchtextTestCase):
         # Build a vocab and get vectors twice to test caching.
         for i in range(2):
             v = vocab.Vocab(c, min_freq=3, specials=['<pad>', '<bos>'],
-                            vectors='fasttext.simple.300d')
+                            vectors=FastText(language='simple')
 
             self.assertEqual(v.itos, ['<unk>', '<pad>', '<bos>',
                                       'ᑌᑎIᑕOᗪᕮ_Tᕮ᙭T', 'hello', 'world'])
@@ -53,7 +54,7 @@ class TestVocab(TorchtextTestCase):
         # Build a vocab and get vectors twice to test caching.
         for i in range(2):
             v = vocab.Vocab(c, min_freq=3, specials=['<pad>', '<bos>'],
-                            vectors='glove.twitter.27B.25d')
+                            vectors=GloVe(name='twitter.27B', dim='25'))
 
             self.assertEqual(v.itos, ['<unk>', '<pad>', '<bos>',
                                       'ᑌᑎIᑕOᗪᕮ_Tᕮ᙭T', 'hello', 'world'])
@@ -86,7 +87,7 @@ class TestVocab(TorchtextTestCase):
         # Build a vocab and get vectors twice to test caching.
         for i in range(2):
             v = vocab.Vocab(c, min_freq=3, specials=['<pad>', '<bos>'],
-                            vectors='charngram.100d')
+                            vectors=CharNGram())
 
             self.assertEqual(v.itos, ['<unk>', '<pad>', '<bos>',
                                       'ᑌᑎIᑕOᗪᕮ_Tᕮ᙭T', 'hello', 'world'])
