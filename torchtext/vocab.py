@@ -30,7 +30,7 @@ class Vocab(object):
     """
 
     def __init__(self, counter, max_size=None, min_freq=1, specials=['<pad>'],
-                 vectors=None, unk_init=torch.Tensor.zero_, expand_vocab=False):
+                 vectors=None):
         """Create a Vocab object from a collections.Counter.
 
         Arguments:
@@ -43,15 +43,9 @@ class Vocab(object):
             specials: The list of special tokens (e.g., padding or eos) that
                 will be prepended to the vocabulary in addition to an <unk>
                 token. Default: ['<pad>']
-            vectors: one of the available pretrained vectors or a list with each
-                element one of the available pretrained vectors
-                (see Vocab.load_vectors). Default: None
-            unk_init (callback): by default, initalize out-of-vocabulary word vectors
-                to zero vectors; can be any function that takes in a Tensor and
-                returns a Tensor of the same size
-            expand_vocab (bool): If True, expand vocabulary to include all
-                words for which the specified pretrained word vectors are
-                available. Default: False
+            vectors: one of either the available pretrained vectors
+                or custom pretrained vectors (see Vocab.load_vectors);
+                or a list of aforementioned vectors
         """
         self.freqs = counter.copy()
         min_freq = max(min_freq, 1)
@@ -75,55 +69,24 @@ class Vocab(object):
             self.stoi[word] = len(self.itos) - 1
 
         if vectors is not None:
-            self.load_vectors(vectors, unk_init=unk_init, expand_vocab=expand_vocab)
+            self.load_vectors(vectors)
 
     def __len__(self):
         return len(self.itos)
 
-    def load_vectors(self, vectors, unk_init=torch.Tensor.zero_, expand_vocab=False):
+    def extend(self, v, sort=True):
+        words = sorted(v.itos) if sort else v.itos
+        for w in words:
+            self.itos.append(w)
+            self.stoi[w] = len(self.itos) - 1
+
+    def load_vectors(self, vectors):
         """Arguments:
-              vectors: one of the available pretrained vectors or a list with each
-                  element one of the available pretrained vectors:
-                       charngram.100d
-                       fasttext.en.300d
-                       fasttext.simple.300d
-                       glove.42B.300d
-                       glove.840B.300d
-                       glove.twitter.27B.25d
-                       glove.twitter.27B.50d
-                       glove.twitter.27B.100d
-                       glove.twitter.27B.200d
-                       glove.6B.50d
-                       glove.6B.100d
-                       glove.6B.200d
-                       glove.6B.300d
-              unk_init (callback): by default, initalize out-of-vocabulary word vectors
-                  to zero vectors; can be any function that takes in a Tensor and
-                  returns a Tensor of the same size
-              expand_vocab (bool): expand vocabulary to include all words for which
-                  the specified pretrained word vectors are available
+              vectors: one of or a list containing instantiations of the
+                  GloVe, CharNGram, or Vectors classes
         """
         if not isinstance(vectors, list):
             vectors = [vectors]
-        vecs = []
-        tot_dim = 0
-        for v in vectors:
-            wv_type, _, rest = v.partition('.')
-            rest, _, wv_dim = rest.rpartition('.')
-            wv_dim = int(wv_dim[:-1])
-            if wv_type == 'glove':
-                wv_name = rest
-                vecs.append(GloVe(name=wv_name, dim=wv_dim, unk_init=unk_init))
-                if expand_vocab:
-                    for w in sorted(vecs[-1].stoi.keys()):
-                        self.itos.append(w)
-                        self.stoi[w] = len(self.itos) - 1
-            elif 'charngram' in v:
-                vecs.append(CharNGram(unk_init=unk_init))
-            elif 'fasttext' in v:
-                wv_language = rest
-                vecs.append(FastText(language=wv_language, unk_init=unk_init))
-            tot_dim += wv_dim
 
         self.vectors = torch.Tensor(len(self), tot_dim)
         for i, token in enumerate(self.itos):
@@ -138,7 +101,7 @@ class Vocab(object):
         self.vectors = torch.Tensor(len(self), dim)
         for i, token in enumerate(self.itos):
             wv_index = stoi.get(token, None)
-            if wv_index is None:
+            if wv_index is not None:
                 self.vectors[i] = vectors[wv_index]
             else:
                 self.vectors[i] = unk_init(self.vectors[i])
@@ -147,6 +110,11 @@ class Vocab(object):
 class Vectors(object):
 
     def __init__(self, unk_init=torch.Tensor.zero_):
+       """Arguments:
+              unk_init (callback): by default, initalize out-of-vocabulary word vectors
+                  to zero vectors; can be any function that takes in a Tensor and
+                  returns a Tensor of the same size
+        """
         self.unk_init = unk_init
 
     def __getitem__(self, token):
@@ -155,7 +123,7 @@ class Vectors(object):
         else:
             return self.unk_init(torch.Tensor(1, self.dim))
 
-    def vector_cache(self, url, root, fname):
+    def vector_cache(self, fname, root='.vector_cache', url=None):
         desc = fname
         fname = os.path.join(root, fname)
         fname_pt = fname + '.pt'
@@ -163,11 +131,11 @@ class Vectors(object):
         desc = os.path.basename(fname)
 
         if not os.path.isfile(fname_pt):
-            dest = os.path.join(root, os.path.basename(url))
-            if not os.path.isfile(fname_txt):
+            if not os.path.isfile(fname_txt) and url:
                 logger.info('Downloading vectors from {}'.format(url))
                 if not os.path.exists(root):
                     os.makedirs(root)
+                dest = os.path.join(root, os.path.basename(url))
                 with tqdm(unit='B', unit_scale=True, miniters=1, desc=desc) as t:
                     urlretrieve(url, dest, reporthook=reporthook(t))
                 logger.info('Extracting vectors into {}'.format(root))
@@ -184,7 +152,7 @@ class Vectors(object):
                 else:
                     raise RuntimeError('unsupported compression format {}'.format(ext))
             if not os.path.isfile(fname_txt):
-                raise RuntimeError('no vectors found')
+                raise RuntimeError('no vectors found at {}'.format(fname_txt))
 
             # str call is necessary for Python 2/3 compatibility, since
             # argument must be Python 2 str (Python 3 bytes) or
@@ -197,7 +165,7 @@ class Vectors(object):
                 with io.open(fname_txt, encoding="utf8") as f:
                     lines = [line for line in f]
             # If there are malformed lines, read in binary mode
-            # and manually decode each word form utf-8
+            # and manually decode each word from utf-8
             except:
                 logger.warning("Could not read {} as UTF8 file, "
                                "reading file as bytes and skipping "
